@@ -5,13 +5,21 @@ import {
   type MessageStructures,
   type SerializedProcessedFile,
 } from "./worker-types.ts";
-import { type InputFile, loadFile } from "../utilities/file-helpers.ts";
+import {
+  type InputFile,
+  loadFile,
+  readFile,
+} from "../utilities/file-helpers.ts";
 import { profilerSchema } from "../schemas/profilerSchema.ts";
 import {
-  type BenchmarkPowerConsumption,
+  type BenchmarkEnergyConsumption,
   processPowerConsumption,
 } from "../utilities/power-utilities.ts";
-import { PowerAmount, PowerAmountUnit } from "../power-amount.ts";
+import {
+  EnergyAmount,
+  EnergyAmountSeries,
+  EnergyAmountUnit,
+} from "../power-amount.ts";
 import {
   type BenchmarkBandwidth,
   processBandwidth,
@@ -27,41 +35,41 @@ function onWorkerMessage<T extends MessageType>(
   });
 }
 
-function getAveragePower(inputs: PowerAmount[]): PowerAmount | undefined {
+function getAverageEnergy(inputs: EnergyAmount[]): EnergyAmount | undefined {
   if (inputs.length === 0) return undefined;
 
-  const consumption = inputs.reduce<PowerAmount>(
+  const consumption = inputs.reduce<EnergyAmount>(
     (acc, curr) => {
       acc.addAmount(curr);
       return acc;
     },
-    new PowerAmount(new Decimal(0), PowerAmountUnit.PicoWattHour),
+    new EnergyAmount(EnergyAmountUnit.PicoWattHour, new Decimal(0)),
   );
 
   consumption.setAmount(consumption.getAmount().dividedBy(inputs.length));
   return consumption;
 }
 
-function getPowerStandardDeviation(
-  inputs: PowerAmount[],
-): PowerAmount | undefined {
+function getEnergyStandardDeviation(
+  inputs: EnergyAmount[],
+): EnergyAmount | undefined {
   if (inputs.length === 0) return undefined;
 
   const mean = inputs
     .reduce<Decimal>((acc, curr) => {
-      return acc.add(curr.getAmount(PowerAmountUnit.PicoWattHour));
+      return acc.add(curr.getAmount(EnergyAmountUnit.PicoWattHour));
     }, new Decimal(0))
     .dividedBy(inputs.length);
 
   const sumPart = inputs.reduce((acc, curr) => {
     return acc.add(
-      curr.getAmount(PowerAmountUnit.PicoWattHour).sub(mean).pow(2),
+      curr.getAmount(EnergyAmountUnit.PicoWattHour).sub(mean).pow(2),
     );
   }, new Decimal(0));
 
-  return new PowerAmount(
+  return new EnergyAmount(
+    EnergyAmountUnit.PicoWattHour,
     sumPart.div(inputs.length).sqrt(),
-    PowerAmountUnit.PicoWattHour,
   );
 }
 
@@ -95,11 +103,13 @@ function postMessage<T extends MessageType>(message: MessageStructures[T][0]) {
 type ProcessedFile = {
   name: string;
   path: string;
-  powerConsumption?: BenchmarkPowerConsumption;
+  energyConsumption?: BenchmarkEnergyConsumption;
   bandwidth?: BenchmarkBandwidth;
 };
 
-async function processFile(file: InputFile): Promise<ProcessedFile> {
+async function processGeckoProfilerFile(
+  file: InputFile,
+): Promise<ProcessedFile> {
   const loadedFile = await loadFile(file);
   const parsedFile = await profilerSchema.safeParseAsync(
     JSON.parse(loadedFile.content),
@@ -142,8 +152,52 @@ async function processFile(file: InputFile): Promise<ProcessedFile> {
     : undefined;
 
   return {
-    powerConsumption,
+    energyConsumption: powerConsumption,
     bandwidth,
+    ...file,
+  };
+}
+
+async function processServerFile(file: InputFile): Promise<ProcessedFile> {
+  const powerConsumption: {
+    total: Decimal;
+    measurements: { time: Decimal; energy: Decimal }[];
+  } = {
+    total: new Decimal(0),
+    measurements: [],
+  };
+
+  await readFile(file, (line, lineNumber) => {
+    // Skip header line
+    if (lineNumber === 0) return;
+
+    const [time, energy] = line.split(",");
+
+    if (!time || !energy)
+      throw new Error(
+        `Line: ${lineNumber} did not contain both time and energy entries in file: ${file.path}`,
+      );
+
+    const [parsedTime, parsedEnergy] = [Decimal(time), Decimal(energy)];
+
+    powerConsumption.total = powerConsumption.total.add(parsedEnergy);
+    powerConsumption.measurements.push({
+      time: parsedTime,
+      energy: parsedEnergy,
+    });
+  });
+
+  return {
+    energyConsumption: {
+      total: new EnergyAmount(
+        EnergyAmountUnit.NanoJoule,
+        powerConsumption.total,
+      ),
+      measurements: new EnergyAmountSeries(
+        EnergyAmountUnit.NanoJoule,
+        powerConsumption.measurements,
+      ),
+    },
     ...file,
   };
 }
@@ -153,10 +207,10 @@ function serializeProcessedFile(
 ): SerializedProcessedFile {
   return {
     ...processedFile,
-    powerConsumption: processedFile.powerConsumption
+    energyConsumption: processedFile.energyConsumption
       ? {
-          total: processedFile.powerConsumption.total.toJSON(),
-          measurements: processedFile.powerConsumption.measurements.toJSON(),
+          total: processedFile.energyConsumption.total.toJSON(),
+          measurements: processedFile.energyConsumption.measurements.toJSON(),
         }
       : undefined,
     bandwidth: processedFile.bandwidth
@@ -174,35 +228,99 @@ function serializeProcessedFile(
   if (!parentPort) throw new Error("Message channel 'parentPort' not defined");
 
   onWorkerMessage(MessageType.Start, async ({ payload }) => {
-    const fileProcessingPromises = payload.files.map(async (file) =>
-      processFile(file),
+    const fileProcessingPromises = Object.entries(payload.iterations).map(
+      async ([iteration, nodes]) => {
+        return {
+          iteration: Number(iteration),
+          client: await processGeckoProfilerFile(nodes.client),
+          server: await processServerFile(nodes.server),
+        };
+      },
     );
 
     const processedFiles = await Promise.all(fileProcessingPromises);
 
-    const processedTotalPower = processedFiles
-      .map((file) => file.powerConsumption?.total)
-      .filter((total) => total !== undefined);
+    // Extract measurements
+    const combinedEnergyConsumption: EnergyAmount[] = [];
+    const serverEnergyConsumption: EnergyAmount[] = [];
+    const clientEnergyConsumption: EnergyAmount[] = [];
+    const clientBandwidthConsumption: Decimal[] = [];
 
-    const processedTotalBandwidth = processedFiles
-      .map((file) => file.bandwidth?.total)
-      .filter((total) => total !== undefined);
+    // TODO: Make sure that the iterations has the correct order in the list
+    for (const file of processedFiles) {
+      const serverEnergy = file.server.energyConsumption?.total;
+      const clientEnergy = file.client.energyConsumption?.total;
+      const clientBandwidth = file.client.bandwidth?.total;
+
+      if (serverEnergy) serverEnergyConsumption.push(serverEnergy);
+      if (clientEnergy) clientEnergyConsumption.push(clientEnergy);
+      if (clientBandwidth) clientBandwidthConsumption.push(clientBandwidth);
+
+      if (serverEnergy !== undefined && clientEnergy !== undefined) {
+        const combined = new EnergyAmount(
+          EnergyAmountUnit.NanoJoule,
+          serverEnergy.getAmount(EnergyAmountUnit.NanoJoule),
+        );
+        combined.addAmount(clientEnergy);
+        combinedEnergyConsumption.push(combined);
+      }
+    }
+
+    /** Calculate averages and standard deviations */
+    // Total energy
+    const combinedEnergyAverage = getAverageEnergy(
+      combinedEnergyConsumption,
+    )?.toJSON();
+    const combinedEnergyStandardDeviation = getEnergyStandardDeviation(
+      combinedEnergyConsumption,
+    )?.toJSON();
+
+    // Server energy
+    const serverEnergyAverage = getAverageEnergy(
+      serverEnergyConsumption,
+    )?.toJSON();
+    const serverEnergyStandardDeviation = getEnergyStandardDeviation(
+      serverEnergyConsumption,
+    )?.toJSON();
+
+    // Client energy
+    const clientEnergyAverage = getAverageEnergy(
+      clientEnergyConsumption,
+    )?.toJSON();
+    const clientEnergyStandardDeviation = getEnergyStandardDeviation(
+      clientEnergyConsumption,
+    )?.toJSON();
+
+    // Client bandwidth
+    const clientBandwidthAverage = getAverageBandwidth(
+      clientBandwidthConsumption,
+    )?.toString();
+    const clientBandwidthStandardDeviation = getBandwidthStandardDeviation(
+      clientBandwidthConsumption,
+    )?.toString();
 
     postMessage({
       type: MessageType.Finished,
       payload: {
         benchmark: payload.benchmark,
         framework: payload.framework,
-        powerAverage: getAveragePower(processedTotalPower)?.toJSON(),
-        powerStandardDeviation:
-          getPowerStandardDeviation(processedTotalPower)?.toJSON(),
-        bandwidthAverage: getAverageBandwidth(
-          processedTotalBandwidth,
-        )?.toString(),
-        bandwidthStandardDeviation: getBandwidthStandardDeviation(
-          processedTotalBandwidth,
-        )?.toString(),
-        files: processedFiles.map((f) => serializeProcessedFile(f)),
+        processed: {
+          combinedEnergyAverage,
+          combinedEnergyStandardDeviation,
+          serverEnergyAverage,
+          serverEnergyStandardDeviation,
+          clientEnergyAverage,
+          clientEnergyStandardDeviation,
+          clientBandwidthAverage,
+          clientBandwidthStandardDeviation,
+        },
+        files: processedFiles.map((f) => {
+          return {
+            iteration: f.iteration,
+            client: serializeProcessedFile(f.client),
+            server: serializeProcessedFile(f.server),
+          };
+        }),
       },
     });
   });

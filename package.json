@@ -1,6 +1,6 @@
 {
-  "name": "firefix-profiler-parser",
-  "version": "1.0.0",
+  "name": "benchmark-runner-data-processor",
+  "version": "2.0.0",
   "type": "module",
   "main": "index.ts",
   "scripts": {
@@ -10,16 +10,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FrameworkBench-RepPack/firefox-profiler-parser.git"
+    "url": "git+https://github.com/FrameworkBenchFullStack-RepPack/gecko-profiler-parser.git"
   },
   "license": "MIT",
   "engines": {
     "node": ">=24.11.0"
   },
   "bugs": {
-    "url": "https://github.com/FrameworkBench-RepPack/firefox-profiler-parser/issues"
+    "url": "https://github.com/FrameworkBenchFullStack-RepPack/gecko-profiler-parser/issues"
   },
-  "homepage": "https://github.com/FrameworkBench-RepPack/firefox-profiler-parser#readme",
+  "homepage": "https://github.com/FrameworkBenchFullStack-RepPack/gecko-profiler-parser#readme",
   "devDependencies": {
     "@types/node": "^24.9.1",
     "commander": "^14.0.2",

@@ -7,15 +7,11 @@ import {
   getResultsPaths,
   groupFiles,
 } from "./utilities/file-helpers";
+import { WorkerInputData, WorkerOutputData } from "./worker/worker-types";
 import {
-  ProcessedFile,
-  WorkerInputData,
-  WorkerOutputData,
-} from "./worker/worker-types";
-import {
-  PowerAmount,
-  PowerAmountSeries,
-  PowerAmountUnit,
+  EnergyAmount,
+  EnergyAmountSeries,
+  EnergyAmountUnit,
 } from "./power-amount";
 import { startWorker } from "./worker/start-worker";
 import { writeCSV } from "./utilities/csv-utilities";
@@ -28,17 +24,16 @@ const PROCESSING_WORKER_PATH = path.resolve(
 
 (async () => {
   program
-    .name("Firefox Profiler Parser")
-    .description(
-      "A CLI tool for processing power measurements from the Firefox Profiler",
-    )
+    .name("benchmark-runner-data-processor")
+    .description("A CLI tool for processing benchmark-runner outputs")
     .version("1.0.0")
     .argument(
       "<path>",
-      "Path to a profiler .json file or a folder containing multiple profiler .json files",
+      "Path to a profiler a folder containing benchmark-runner outputs",
     )
     .option("-t, --threads <entries>", "specify number of workers to use", "1")
-    .option("--exportRaw", "export power measurements in csv file", false);
+    .option("--export-raw", "export power measurements in csv file", false)
+    .option("--print-results", "print results to terminal", false);
 
   // Parse program and extract options
   program.parse();
@@ -59,14 +54,18 @@ const PROCESSING_WORKER_PATH = path.resolve(
   const processedData: WorkerOutputData[] = [];
 
   // Create worker tasks
-  for (const [benchmark, benchmarkObject] of Object.entries(groupedFiles)) {
-    console.log(`Benchmark: ${benchmark}`);
-    for (const [framework, files] of Object.entries(benchmarkObject)) {
+  for (const [name, benchmark] of Object.entries(groupedFiles)) {
+    console.log(`Benchmark: ${name}`);
+    for (const [framework, iterations] of Object.entries(benchmark)) {
       console.log(
-        `Creating Worker Task - Framework: ${framework}, Iterations: ${files.length}`,
+        `Creating Worker Task - Framework: ${framework}, Iterations: ${Object.entries(iterations).length}`,
       );
 
-      const workerData: WorkerInputData = { benchmark, framework, files };
+      const workerData: WorkerInputData = {
+        benchmark: name,
+        framework,
+        iterations,
+      };
       tasks.push(workerData);
     }
   }
@@ -104,50 +103,87 @@ const PROCESSING_WORKER_PATH = path.resolve(
   const deserializedResults = processedData.map((r) => {
     return {
       ...r,
-      powerAverage: PowerAmount.fromJSON(r.powerAverage),
-      powerStandardDeviation: PowerAmount.fromJSON(r.powerStandardDeviation),
-      bandwidthAverage: r.bandwidthAverage
-        ? new Decimal(r.bandwidthAverage)
-        : undefined,
-      bandwidthStandardDeviation: r.bandwidthStandardDeviation
-        ? new Decimal(r.bandwidthStandardDeviation)
-        : undefined,
+      processed: {
+        combinedEnergyAverage: EnergyAmount.fromJSON(
+          r.processed.combinedEnergyAverage,
+        ),
+        combinedEnergyStandardDeviation: EnergyAmount.fromJSON(
+          r.processed.combinedEnergyStandardDeviation,
+        ),
+        serverEnergyAverage: EnergyAmount.fromJSON(
+          r.processed.serverEnergyAverage,
+        ),
+        serverEnergyStandardDeviation: EnergyAmount.fromJSON(
+          r.processed.serverEnergyStandardDeviation,
+        ),
+        clientEnergyAverage: EnergyAmount.fromJSON(
+          r.processed.clientEnergyAverage,
+        ),
+        clientEnergyStandardDeviation: EnergyAmount.fromJSON(
+          r.processed.clientEnergyStandardDeviation,
+        ),
+        clientBandwidthAverage: r.processed.clientBandwidthAverage
+          ? new Decimal(r.processed.clientBandwidthAverage)
+          : undefined,
+        clientBandwidthStandardDeviation: r.processed
+          .clientBandwidthStandardDeviation
+          ? new Decimal(r.processed.clientBandwidthStandardDeviation)
+          : undefined,
+      },
       files: r.files.map((f) => {
         return {
-          ...f,
-          powerConsumption: {
-            total: PowerAmount.fromJSON(f.powerConsumption?.total),
-            measurements: PowerAmountSeries.fromJSON(
-              f.powerConsumption?.measurements,
-            ),
+          iteration: f.iteration,
+          client: {
+            ...f.client,
+            energyConsumption: {
+              total: EnergyAmount.fromJSON(f.client.energyConsumption?.total),
+              measurements: EnergyAmountSeries.fromJSON(
+                f.client.energyConsumption?.measurements,
+              ),
+            },
+            bandwidth: f.client.bandwidth
+              ? {
+                  total: new Decimal(f.client.bandwidth?.total),
+                  measurements: f.client.bandwidth.measurements.map<
+                    [string, Decimal]
+                  >(([file, bandwidth]) => [file, new Decimal(bandwidth)]),
+                }
+              : undefined,
           },
-          bandwidth: f.bandwidth
-            ? {
-                total: new Decimal(f.bandwidth?.total),
-                measurements: f.bandwidth.measurements.map<[string, Decimal]>(
-                  ([file, bandwidth]) => [file, new Decimal(bandwidth)],
-                ),
-              }
-            : undefined,
+          server: {
+            ...f.server,
+            energyConsumption: {
+              total: EnergyAmount.fromJSON(f.server.energyConsumption?.total),
+              measurements: EnergyAmountSeries.fromJSON(
+                f.server.energyConsumption?.measurements,
+              ),
+            },
+          },
         };
       }),
     };
   });
 
+  const getCsvEntry = (amount: EnergyAmount | undefined): string => {
+    return amount?.getAmount(EnergyAmountUnit.Joule).toString() ?? "N/A";
+  };
+
   /* Export per benchmark CSV processed results*/
   const perBenchmarkCsvEntries = deserializedResults.reduce<
     Record<string, string[][]>
   >((acc, result) => {
-    if (!acc[result.benchmark]) acc[result.benchmark] = [];
+    acc[result.benchmark] ??= [];
 
     acc[result.benchmark]?.push([
       result.framework,
-      result.powerAverage?.getAmount(PowerAmountUnit.Joule).toString() ?? "N/A",
-      result.powerStandardDeviation
-        ?.getAmount(PowerAmountUnit.Joule)
-        .toString() ?? "N/A",
-      result.bandwidthAverage?.toString() ?? "N/A",
-      result.bandwidthStandardDeviation?.toString() ?? "N/A",
+      getCsvEntry(result.processed.combinedEnergyAverage),
+      getCsvEntry(result.processed.combinedEnergyStandardDeviation),
+      getCsvEntry(result.processed.clientEnergyAverage),
+      getCsvEntry(result.processed.clientEnergyStandardDeviation),
+      getCsvEntry(result.processed.serverEnergyAverage),
+      getCsvEntry(result.processed.serverEnergyStandardDeviation),
+      result.processed.clientBandwidthAverage?.toString() ?? "N/A",
+      result.processed.clientBandwidthStandardDeviation?.toString() ?? "N/A",
     ]);
 
     return acc;
@@ -158,10 +194,14 @@ const PROCESSING_WORKER_PATH = path.resolve(
       path: resultsPath + `/${benchmark}.csv`,
       header: [
         "Framework",
-        `Average Total Power (${PowerAmountUnit.Joule})`,
-        `Total Power SD (${PowerAmountUnit.Joule})`,
-        `Average Total Bandwidth (B)`,
-        `Total Bandwidth SD (B)`,
+        `Combined Energy Average (${EnergyAmountUnit.Joule})`,
+        `Combined Energy SD (${EnergyAmountUnit.Joule})`,
+        `Client Energy Average (${EnergyAmountUnit.Joule})`,
+        `Client Energy SD (${EnergyAmountUnit.Joule})`,
+        `Server Energy Average (${EnergyAmountUnit.Joule})`,
+        `Server Energy SD (${EnergyAmountUnit.Joule})`,
+        `Client Bandwidth Average (B)`,
+        `Client Bandwidth SD (B)`,
       ],
       fields: result,
     });
@@ -176,10 +216,9 @@ const PROCESSING_WORKER_PATH = path.resolve(
     for (const file of result.files) {
       acc[result.benchmark]?.push([
         result.framework,
-        file.powerConsumption.total
-          ?.getAmount(PowerAmountUnit.Joule)
-          .toString() ?? "N/A",
-        file.bandwidth?.total?.toString() ?? "N/A",
+        getCsvEntry(file.client.energyConsumption.total),
+        getCsvEntry(file.server.energyConsumption.total),
+        file.client.bandwidth?.total?.toString() ?? "N/A",
       ]);
     }
 
@@ -193,75 +232,127 @@ const PROCESSING_WORKER_PATH = path.resolve(
       path: combinedResultsPath + `/${benchmark}.csv`,
       header: [
         "Framework",
-        `Total Power (${PowerAmountUnit.Joule})`,
-        `Total Bandwidth (B)`,
+        `Client Energy (${EnergyAmountUnit.Joule})`,
+        `Server Energy (${EnergyAmountUnit.Joule})`,
+        `Client Bandwidth (B)`,
       ],
       fields: result,
     });
   }
 
-  for (const result of deserializedResults) {
-    result.powerAverage?.convert(PowerAmountUnit.MicroWattHour);
-    result.powerStandardDeviation?.convert(PowerAmountUnit.MicroWattHour);
-
+  // Print output to terminal
+  if (options.printResults) {
     console.log(
-      `${result.benchmark} - ${result.framework} - Power average: ${
-        result.powerAverage ? result.powerAverage.getString(2) : "N/A"
-      } Standard deviation: ${
-        result.powerStandardDeviation
-          ? result.powerStandardDeviation.getString(2)
-          : "N/A"
-      } - Bandwidth: ${
-        result.bandwidthAverage
-          ? `${result.bandwidthAverage.div(1000)} KB`
-          : "N/A"
-      } Standard deviation: ${result.bandwidthStandardDeviation ?? "N/A"}`,
+      `Benchmark - Combined Energy Avg - Combined Energy SD - Server Energy Avg - Server Energy SD - Client Energy Avg - Client Energy SD - Bandwidth Avg - Bandwidth SD - Framework`,
     );
+  }
+
+  for (const result of deserializedResults.toSorted((first, second) =>
+    first.benchmark > second.benchmark ? -1 : 1,
+  )) {
+    result.processed.combinedEnergyAverage?.convert(EnergyAmountUnit.Joule);
+    result.processed.combinedEnergyStandardDeviation?.convert(
+      EnergyAmountUnit.Joule,
+    );
+    result.processed.serverEnergyAverage?.convert(EnergyAmountUnit.Joule);
+    result.processed.serverEnergyStandardDeviation?.convert(
+      EnergyAmountUnit.Joule,
+    );
+    result.processed.clientEnergyAverage?.convert(EnergyAmountUnit.Joule);
+    result.processed.clientEnergyStandardDeviation?.convert(
+      EnergyAmountUnit.Joule,
+    );
+
+    // Print output to terminal
+    if (options.printResults) {
+      console.log(
+        `${result.benchmark} - ${
+          result.processed.combinedEnergyAverage
+            ? result.processed.combinedEnergyAverage.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.combinedEnergyStandardDeviation
+            ? result.processed.combinedEnergyStandardDeviation.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.serverEnergyAverage
+            ? result.processed.serverEnergyAverage.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.serverEnergyStandardDeviation
+            ? result.processed.serverEnergyStandardDeviation.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.clientEnergyAverage
+            ? result.processed.clientEnergyAverage.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.clientEnergyStandardDeviation
+            ? result.processed.clientEnergyStandardDeviation.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.clientBandwidthAverage
+            ? `${result.processed.clientBandwidthAverage.div(1000)} KB`
+            : "N/A"
+        } - ${result.processed.clientBandwidthAverage ?? "N/A"} - ${result.framework}`,
+      );
+    }
 
     // Extract total power measurements
     writeCSV({
       path: summedResultsPath + `/${result.benchmark}-${result.framework}.csv`,
       header: [
         "Iteration",
-        `Total Power (${PowerAmountUnit.Joule})`,
-        "Total Bandwidth (B)",
+        `Server Energy (${EnergyAmountUnit.Joule})`,
+        `Client Energy (${EnergyAmountUnit.Joule})`,
+        "Client Bandwidth (B)",
       ],
-      fields: result.files.map((processedFile, index) => [
-        index,
-        processedFile.powerConsumption?.total
-          ?.getAmount(PowerAmountUnit.Joule)
-          .toString() ?? "N/A",
-        processedFile.bandwidth?.total.toString() ?? "N/A",
+      fields: result.files.map((processedFile) => [
+        processedFile.iteration,
+        getCsvEntry(processedFile.server.energyConsumption.total),
+        getCsvEntry(processedFile.client.energyConsumption.total),
+        processedFile.client.bandwidth?.total.toString() ?? "N/A",
       ]),
     });
 
     if (options.exportRaw) {
       for (const file of result.files) {
-        const fileName = file.name.split(".")[0];
+        const fileName = file.client.name.split(".")[0];
         if (!fileName) throw new Error("Splitting file failed");
 
-        const powerAmountSeries = file.powerConsumption?.measurements;
-
-        writeCSV({
-          path: rawResultsPath + `/${file.name}_power-raw.csv`,
-          header: [
-            "Time",
-            `Total Power (${powerAmountSeries?.getUnit() ?? "N/A"})`,
-          ],
-          fields:
-            powerAmountSeries
-              ?.getMeasurements()
-              .map((measurement) => [
-                measurement.time.toString(),
-                measurement.power.toString(),
-              ]) ?? [],
+        // Energy consumption files
+        [
+          {
+            name: file.client.name,
+            measurements: file.client.energyConsumption?.measurements,
+          },
+          {
+            name: file.server.name,
+            measurements: file.server.energyConsumption?.measurements,
+          },
+        ].forEach(({ name, measurements }) => {
+          writeCSV({
+            path: rawResultsPath + `/${name}_power-raw.csv`,
+            header: [
+              "Time",
+              `Total Power (${measurements?.getUnit() ?? "N/A"})`,
+            ],
+            fields:
+              measurements
+                ?.getMeasurements()
+                .map((measurement) => [
+                  measurement.time.toString(),
+                  measurement.energy.toString(),
+                ]) ?? [],
+          });
         });
 
+        // Bandwidth files
         writeCSV({
-          path: rawResultsPath + `/${file.name}_bandwidth-raw.csv`,
+          path: rawResultsPath + `/${file.client.name}_bandwidth-raw.csv`,
           header: ["File", "Total Bandwidth (B)"],
           fields:
-            file.bandwidth?.measurements.map(([file, size]) => [
+            file.client.bandwidth?.measurements.map(([file, size]) => [
               file,
               size.toString(),
             ]) ?? [],

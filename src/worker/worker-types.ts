@@ -1,7 +1,7 @@
-import type { InputFile } from "../utilities/file-helpers.ts";
-import type { SerializedPowerAmount } from "../power-amount.ts";
+import type { GroupedNodes, InputFile } from "../utilities/file-helpers.ts";
+import type { SerializedEnergyAmount } from "../power-amount.ts";
 import type {
-  BenchmarkPowerConsumption,
+  BenchmarkEnergyConsumption,
   SerializedBenchmarkPowerConsumption,
 } from "../utilities/power-utilities.ts";
 import type {
@@ -11,28 +11,38 @@ import type {
 } from "../utilities/bandwidth.ts";
 
 export type SerializedProcessedFile = InputFile & {
-  powerConsumption?: SerializedBenchmarkPowerConsumption;
+  energyConsumption?: SerializedBenchmarkPowerConsumption;
   bandwidth?: SerializedBenchmarkBandwidth;
 };
 
 export type ProcessedFile = InputFile & {
-  powerConsumption?: BenchmarkPowerConsumption;
+  powerConsumption?: BenchmarkEnergyConsumption;
   bandwidth?: BenchmarkBandwidth;
 };
 
 export type WorkerInputData = {
   benchmark: string;
   framework: string;
-  files: InputFile[];
+  iterations: Record<number, GroupedNodes>;
 };
 export type WorkerOutputData = {
   benchmark: string;
   framework: string;
-  powerAverage?: SerializedPowerAmount;
-  powerStandardDeviation?: SerializedPowerAmount;
-  bandwidthAverage?: SerializedBandwidth;
-  bandwidthStandardDeviation?: SerializedBandwidth;
-  files: SerializedProcessedFile[];
+  processed: {
+    combinedEnergyAverage?: SerializedEnergyAmount;
+    combinedEnergyStandardDeviation?: SerializedEnergyAmount;
+    serverEnergyAverage?: SerializedEnergyAmount;
+    serverEnergyStandardDeviation?: SerializedEnergyAmount;
+    clientEnergyAverage?: SerializedEnergyAmount;
+    clientEnergyStandardDeviation?: SerializedEnergyAmount;
+    clientBandwidthAverage?: SerializedBandwidth;
+    clientBandwidthStandardDeviation?: SerializedBandwidth;
+  };
+  files: {
+    iteration: number;
+    client: SerializedProcessedFile;
+    server: SerializedProcessedFile;
+  }[];
 };
 
 export const MessageType = {

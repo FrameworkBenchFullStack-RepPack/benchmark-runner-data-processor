@@ -1,26 +1,26 @@
 import Decimal from "decimal.js";
 import {
-  PowerAmountUnit,
-  PowerAmount,
-  PowerAmountSeries,
-  type SerializedPowerAmount,
-  type SerializedPowerAmountSeries,
+  EnergyAmountUnit,
+  EnergyAmount,
+  EnergyAmountSeries,
+  type SerializedEnergyAmount,
+  type SerializedEnergyAmountSeries,
 } from "../power-amount.ts";
 import { type Counter } from "../schemas/profilerSchema.ts";
 
 export type SerializedBenchmarkPowerConsumption = {
-  total: SerializedPowerAmount;
-  measurements: SerializedPowerAmountSeries;
+  total: SerializedEnergyAmount;
+  measurements: SerializedEnergyAmountSeries;
 };
 
-export type BenchmarkPowerConsumption = {
-  total: PowerAmount;
-  measurements: PowerAmountSeries;
+export type BenchmarkEnergyConsumption = {
+  total: EnergyAmount;
+  measurements: EnergyAmountSeries;
 };
 
 export function processPowerConsumption(
   counter: Counter,
-): BenchmarkPowerConsumption {
+): BenchmarkEnergyConsumption {
   if (counter.category !== "power")
     throw new Error("Counter does not contain power samples");
 
@@ -32,7 +32,7 @@ export function processPowerConsumption(
 
   const powerConsumption: {
     total: Decimal;
-    measurements: { time: Decimal; power: Decimal }[];
+    measurements: { time: Decimal; energy: Decimal }[];
   } = {
     total: new Decimal(0),
     measurements: [],
@@ -47,17 +47,17 @@ export function processPowerConsumption(
     powerConsumption.total = powerConsumption.total.add(power);
     powerConsumption.measurements.push({
       time: new Decimal(time),
-      power: new Decimal(power),
+      energy: new Decimal(power),
     });
   }
 
   return {
-    total: new PowerAmount(
+    total: new EnergyAmount(
+      EnergyAmountUnit.PicoWattHour,
       powerConsumption.total,
-      PowerAmountUnit.PicoWattHour,
     ),
-    measurements: new PowerAmountSeries(
-      PowerAmountUnit.PicoWattHour,
+    measurements: new EnergyAmountSeries(
+      EnergyAmountUnit.PicoWattHour,
       powerConsumption.measurements,
     ),
   };

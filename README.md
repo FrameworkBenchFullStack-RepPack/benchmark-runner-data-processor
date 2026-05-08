@@ -1,4 +1,4 @@
-# gecko-profiler-parser
+# benchmark-runner-data-processor
 
 A CLI tool for parsing and extracting relevant energy and bandwidth information from Gecko Profiler outputs.
 
@@ -9,7 +9,7 @@ A CLI tool for parsing and extracting relevant energy and bandwidth information 
 To clone the repository run the following git command:
 
 ```bash
-git clone https://github.com/FrameworkBench-RepPack/gecko-profiler-parser.git
+git clone https://github.com/FrameworkBenchFullStack-RepPack/gecko-profiler-parser.git
 cd ./gecko-profiler-parser
 ```
 
@@ -33,19 +33,20 @@ To view available options and usage details, run:
 
 ```
 $ npm run parse -- --help
-> firefix-profiler-parser@1.0.0 parse
+> benchmark-runner-data-processor@2.0.0 parse
 > tsx src/index.ts --help
 
-Usage: Firefox Profiler Parser [options] <path>
+Usage: benchmark-runner-data-processor [options] <path>
 
-A CLI tool for processing power measurements from the Firefox Profiler
+A CLI tool for processing benchmark-runner outputs
 
 Arguments:
-  path                     Path to a profiler .json file or a folder containing multiple profiler .json files
+  path                     Path to a profiler a folder containing benchmark-runner outputs
 
 Options:
   -V, --version            output the version number
   -t, --threads <entries>  specify number of workers to use (default: "1")
-  --exportRaw              export power measurements in csv file (default: false)
+  --export-raw             export power measurements in csv file (default: false)
+  --print-results          print results to terminal (default: false)
   -h, --help               display help for command
 ```
