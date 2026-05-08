@@ -294,7 +294,11 @@ const PROCESSING_WORKER_PATH = path.resolve(
           result.processed.clientBandwidthAverage
             ? `${result.processed.clientBandwidthAverage.div(1000)} KB`
             : "N/A"
-        } - ${result.processed.clientBandwidthAverage ?? "N/A"} - ${result.framework}`,
+        } - ${
+          result.processed.clientBandwidthStandardDeviation
+            ? `${result.processed.clientBandwidthStandardDeviation.div(1000)} KB`
+            : "N/A"
+        } - ${result.framework}`,
       );
     }
 
