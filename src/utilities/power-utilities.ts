@@ -20,9 +20,12 @@ export type BenchmarkEnergyConsumption = {
 
 export function processPowerConsumption(
   counter: Counter,
+  startTime: number,
 ): BenchmarkEnergyConsumption {
   if (counter.category !== "power")
     throw new Error("Counter does not contain power samples");
+
+  const startTimeDecimal = new Decimal(startTime);
 
   const timeIndex = counter.samples.schema["time"];
   const powerIndex = counter.samples.schema["count"];
@@ -42,11 +45,12 @@ export function processPowerConsumption(
     const time = sample[timeIndex];
     const power = sample[powerIndex];
 
-    if (!time || !power) throw new Error("Time or power not defined");
+    if (time === undefined || power === undefined)
+      throw new Error("Time or power not defined");
 
     powerConsumption.total = powerConsumption.total.add(power);
     powerConsumption.measurements.push({
-      time: new Decimal(time),
+      time: new Decimal(startTimeDecimal.add(time)),
       energy: new Decimal(power),
     });
   }

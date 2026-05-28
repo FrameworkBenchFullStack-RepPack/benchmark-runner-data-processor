@@ -43,7 +43,7 @@ export function startWorker({
       processedData.push(message.payload);
 
       console.log(
-        `Worker finished task for: ${message.payload.benchmark} - ${message.payload.framework}`,
+        `Worker finished task for: ${message.payload.benchmark} - ${message.payload.framework} - ${message.payload.round}`,
       );
 
       const nextTask = taskQueue.pop();
