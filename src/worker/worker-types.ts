@@ -23,11 +23,13 @@ export type ProcessedFile = InputFile & {
 export type WorkerInputData = {
   benchmark: string;
   framework: string;
+  round: number;
   iterations: Record<number, GroupedNodes>;
 };
 export type WorkerOutputData = {
   benchmark: string;
   framework: string;
+  round: number;
   processed: {
     combinedEnergyAverage?: SerializedEnergyAmount;
     combinedEnergyStandardDeviation?: SerializedEnergyAmount;

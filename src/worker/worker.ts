@@ -140,7 +140,7 @@ async function processGeckoProfilerFile(
   );
 
   const powerConsumption = powerCounter
-    ? processPowerConsumption(powerCounter)
+    ? processPowerConsumption(powerCounter, localhostProcess.meta.startTime)
     : undefined;
 
   const bandwidthMarkers = localhostProcess.threads?.find(
@@ -304,6 +304,7 @@ function serializeProcessedFile(
       payload: {
         benchmark: payload.benchmark,
         framework: payload.framework,
+        round: payload.round,
         processed: {
           combinedEnergyAverage,
           combinedEnergyStandardDeviation,

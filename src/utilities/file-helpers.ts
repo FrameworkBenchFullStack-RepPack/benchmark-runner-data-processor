@@ -24,7 +24,7 @@ export type GroupedNodes = {
 
 export type GroupedBenchmarks<NodesContainer> = Record<
   string,
-  Record<string, Record<number, NodesContainer>>
+  Record<string, Record<number, Record<number, NodesContainer>>>
 >;
 
 export type ImportedFile<T = string> = InputFile & {
@@ -113,9 +113,11 @@ function isCompleteGroupedBenchmarks(
 ): input is GroupedBenchmarks<GroupedNodes> {
   return !Object.values(input).some((benchmark) =>
     Object.values(benchmark).some((framework) =>
-      Object.values(framework).some(
-        (iteration) =>
-          iteration.client === undefined || iteration.server === undefined,
+      Object.values(framework).some((round) =>
+        Object.values(round).some(
+          (iteration) =>
+            iteration.client === undefined || iteration.server === undefined,
+        ),
       ),
     ),
   );
@@ -124,18 +126,21 @@ function isCompleteGroupedBenchmarks(
 export function groupFiles(
   files: InputFile[],
 ): GroupedBenchmarks<GroupedNodes> {
-  // Record<BenchmarkName, Record<Framework, Record<Iteration, Client / Server files>>>
+  // Record<BenchmarkName, Record<Framework, Record<Round, Record<Iteration, Client / Server files>>>>
   const benchmarks: GroupedBenchmarks<Partial<GroupedNodes>> = {};
   for (const file of files) {
     const [filename] = file.name.split(".");
     if (!filename) throw new Error("Filename is undefined");
 
-    const [benchmark, framework, iteration, node] = filename.split("_");
+    const [benchmark, framework, iteration, round, node] = filename.split("_");
     const parsedIteration = Number(iteration);
+    const parsedRound = Number(round);
 
     if (
       !iteration ||
       !Number.isSafeInteger(parsedIteration) ||
+      !round ||
+      !Number.isSafeInteger(parsedRound) ||
       !benchmark ||
       !framework ||
       (node !== "client" && node !== "server")
@@ -145,8 +150,10 @@ export function groupFiles(
       );
 
     // Create object and list if necessary and add file
-    ((benchmarks[benchmark] ??= {})[framework] ??= {})[parsedIteration] ??= {};
-    benchmarks[benchmark][framework][parsedIteration][node] = file;
+    (((benchmarks[benchmark] ??= {})[framework] ??= {})[parsedRound] ??= {})[
+      parsedIteration
+    ] ??= {};
+    benchmarks[benchmark][framework][parsedRound][parsedIteration][node] = file;
   }
 
   if (!isCompleteGroupedBenchmarks(benchmarks))

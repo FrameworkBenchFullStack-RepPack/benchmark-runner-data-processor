@@ -1,8 +1,6 @@
 import { program } from "commander";
 import path from "node:path";
-import { mkdirSync, write } from "node:fs";
 import {
-  getAbsolutePath,
   getBenchmarkFiles,
   getResultsPaths,
   groupFiles,
@@ -54,19 +52,25 @@ const PROCESSING_WORKER_PATH = path.resolve(
   const processedData: WorkerOutputData[] = [];
 
   // Create worker tasks
-  for (const [name, benchmark] of Object.entries(groupedFiles)) {
-    console.log(`Benchmark: ${name}`);
-    for (const [framework, iterations] of Object.entries(benchmark)) {
-      console.log(
-        `Creating Worker Task - Framework: ${framework}, Iterations: ${Object.entries(iterations).length}`,
-      );
+  for (const [benchmark, frameworks] of Object.entries(groupedFiles)) {
+    console.log(`Benchmark: ${benchmark}`);
+    for (const [framework, rounds] of Object.entries(frameworks)) {
+      for (const [roundKey, iterations] of Object.entries(rounds)) {
+        // Has already been parsed as a safe integer
+        const round = Number(roundKey);
 
-      const workerData: WorkerInputData = {
-        benchmark: name,
-        framework,
-        iterations,
-      };
-      tasks.push(workerData);
+        console.log(
+          `Creating Worker Task - Framework: ${framework} - Round: ${round}, Iterations: ${Object.entries(iterations).length}`,
+        );
+
+        const workerData: WorkerInputData = {
+          benchmark,
+          framework,
+          round,
+          iterations,
+        };
+        tasks.push(workerData);
+      }
     }
   }
 
@@ -176,6 +180,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
 
     acc[result.benchmark]?.push([
       result.framework,
+      String(result.round),
       getCsvEntry(result.processed.combinedEnergyAverage),
       getCsvEntry(result.processed.combinedEnergyStandardDeviation),
       getCsvEntry(result.processed.clientEnergyAverage),
@@ -194,6 +199,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
       path: resultsPath + `/${benchmark}.csv`,
       header: [
         "Framework",
+        "Round",
         `Combined Energy Average (${EnergyAmountUnit.Joule})`,
         `Combined Energy SD (${EnergyAmountUnit.Joule})`,
         `Client Energy Average (${EnergyAmountUnit.Joule})`,
@@ -209,12 +215,12 @@ const PROCESSING_WORKER_PATH = path.resolve(
 
   /* Export per benchmark CSV processed results*/
   const combinedPerBenchmarkIterations = deserializedResults.reduce<
-    Record<string, string[][]>
+    Record<string, Record<string, string[][]>>
   >((acc, result) => {
-    if (!acc[result.benchmark]) acc[result.benchmark] = [];
+    (acc[result.benchmark] ??= {})[result.round] ??= [];
 
     for (const file of result.files) {
-      acc[result.benchmark]?.push([
+      acc[result.benchmark]?.[result.round]?.push([
         result.framework,
         getCsvEntry(file.client.energyConsumption.total),
         getCsvEntry(file.server.energyConsumption.total),
@@ -225,31 +231,33 @@ const PROCESSING_WORKER_PATH = path.resolve(
     return acc;
   }, {});
 
-  for (const [benchmark, result] of Object.entries(
+  for (const [benchmark, rounds] of Object.entries(
     combinedPerBenchmarkIterations,
   )) {
-    writeCSV({
-      path: combinedResultsPath + `/${benchmark}.csv`,
-      header: [
-        "Framework",
-        `Client Energy (${EnergyAmountUnit.Joule})`,
-        `Server Energy (${EnergyAmountUnit.Joule})`,
-        `Client Bandwidth (B)`,
-      ],
-      fields: result,
-    });
+    for (const [round, result] of Object.entries(rounds)) {
+      writeCSV({
+        path: combinedResultsPath + `/${benchmark}_round-${round}.csv`,
+        header: [
+          "Framework",
+          `Client Energy (${EnergyAmountUnit.Joule})`,
+          `Server Energy (${EnergyAmountUnit.Joule})`,
+          `Client Bandwidth (B)`,
+        ],
+        fields: result,
+      });
+    }
   }
 
   // Print output to terminal
   if (options.printResults) {
     console.log(
-      `Benchmark - Combined Energy Avg - Combined Energy SD - Server Energy Avg - Server Energy SD - Client Energy Avg - Client Energy SD - Bandwidth Avg - Bandwidth SD - Framework`,
+      `Benchmark - Round - Combined Energy Avg - Combined Energy SD - Server Energy Avg - Server Energy SD - Client Energy Avg - Client Energy SD - Bandwidth Avg - Bandwidth SD - Framework`,
     );
   }
 
-  for (const result of deserializedResults.toSorted((first, second) =>
-    first.benchmark > second.benchmark ? -1 : 1,
-  )) {
+  for (const result of deserializedResults
+    .toSorted((first, second) => (first.benchmark > second.benchmark ? -1 : 1))
+    .toSorted((first, second) => first.round - second.round)) {
     result.processed.combinedEnergyAverage?.convert(EnergyAmountUnit.Joule);
     result.processed.combinedEnergyStandardDeviation?.convert(
       EnergyAmountUnit.Joule,
@@ -266,7 +274,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
     // Print output to terminal
     if (options.printResults) {
       console.log(
-        `${result.benchmark} - ${
+        `${result.benchmark} - ${result.round} - ${
           result.processed.combinedEnergyAverage
             ? result.processed.combinedEnergyAverage.getString(2)
             : "N/A"
@@ -304,7 +312,9 @@ const PROCESSING_WORKER_PATH = path.resolve(
 
     // Extract total power measurements
     writeCSV({
-      path: summedResultsPath + `/${result.benchmark}-${result.framework}.csv`,
+      path:
+        summedResultsPath +
+        `/${result.benchmark}_${result.framework}_round-${result.round}.csv`,
       header: [
         "Iteration",
         `Server Energy (${EnergyAmountUnit.Joule})`,
@@ -324,6 +334,14 @@ const PROCESSING_WORKER_PATH = path.resolve(
         const fileName = file.client.name.split(".")[0];
         if (!fileName) throw new Error("Splitting file failed");
 
+        // Convert
+        file.client.energyConsumption?.measurements?.convert(
+          EnergyAmountUnit.NanoJoule,
+        );
+        file.server.energyConsumption?.measurements?.convert(
+          EnergyAmountUnit.NanoJoule,
+        );
+
         // Energy consumption files
         [
           {
@@ -335,15 +353,13 @@ const PROCESSING_WORKER_PATH = path.resolve(
             measurements: file.server.energyConsumption?.measurements,
           },
         ].forEach(({ name, measurements }) => {
+          const unit = measurements?.getUnit() ?? EnergyAmountUnit.NanoJoule;
           writeCSV({
-            path: rawResultsPath + `/${name}_power-raw.csv`,
-            header: [
-              "Time",
-              `Total Power (${measurements?.getUnit() ?? "N/A"})`,
-            ],
+            path: rawResultsPath + `/${name}_energy-raw.csv`,
+            header: ["Time", `Energy (${unit})`],
             fields:
               measurements
-                ?.getMeasurements()
+                ?.getMeasurements(unit)
                 .map((measurement) => [
                   measurement.time.toString(),
                   measurement.energy.toString(),
