@@ -120,6 +120,12 @@ const PROCESSING_WORKER_PATH = path.resolve(
         serverEnergyStandardDeviation: EnergyAmount.fromJSON(
           r.processed.serverEnergyStandardDeviation,
         ),
+        databaseEnergyAverage: EnergyAmount.fromJSON(
+          r.processed.databaseEnergyAverage,
+        ),
+        databaseEnergyStandardDeviation: EnergyAmount.fromJSON(
+          r.processed.databaseEnergyStandardDeviation,
+        ),
         clientEnergyAverage: EnergyAmount.fromJSON(
           r.processed.clientEnergyAverage,
         ),
@@ -163,6 +169,15 @@ const PROCESSING_WORKER_PATH = path.resolve(
               ),
             },
           },
+          database: {
+            ...f.database,
+            energyConsumption: {
+              total: EnergyAmount.fromJSON(f.database.energyConsumption?.total),
+              measurements: EnergyAmountSeries.fromJSON(
+                f.database.energyConsumption?.measurements,
+              ),
+            },
+          },
         };
       }),
     };
@@ -187,6 +202,8 @@ const PROCESSING_WORKER_PATH = path.resolve(
       getCsvEntry(result.processed.clientEnergyStandardDeviation),
       getCsvEntry(result.processed.serverEnergyAverage),
       getCsvEntry(result.processed.serverEnergyStandardDeviation),
+      getCsvEntry(result.processed.databaseEnergyAverage),
+      getCsvEntry(result.processed.databaseEnergyStandardDeviation),
       result.processed.clientBandwidthAverage?.toString() ?? "N/A",
       result.processed.clientBandwidthStandardDeviation?.toString() ?? "N/A",
     ]);
@@ -206,6 +223,8 @@ const PROCESSING_WORKER_PATH = path.resolve(
         `Client Energy SD (${EnergyAmountUnit.Joule})`,
         `Server Energy Average (${EnergyAmountUnit.Joule})`,
         `Server Energy SD (${EnergyAmountUnit.Joule})`,
+        `Database Energy Average (${EnergyAmountUnit.Joule})`,
+        `Database Energy SD (${EnergyAmountUnit.Joule})`,
         `Client Bandwidth Average (B)`,
         `Client Bandwidth SD (B)`,
       ],
@@ -224,6 +243,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
         result.framework,
         getCsvEntry(file.client.energyConsumption.total),
         getCsvEntry(file.server.energyConsumption.total),
+        getCsvEntry(file.database.energyConsumption.total),
         file.client.bandwidth?.total?.toString() ?? "N/A",
       ]);
     }
@@ -241,6 +261,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
           "Framework",
           `Client Energy (${EnergyAmountUnit.Joule})`,
           `Server Energy (${EnergyAmountUnit.Joule})`,
+          `Database Energy (${EnergyAmountUnit.Joule})`,
           `Client Bandwidth (B)`,
         ],
         fields: result,
@@ -251,7 +272,7 @@ const PROCESSING_WORKER_PATH = path.resolve(
   // Print output to terminal
   if (options.printResults) {
     console.log(
-      `Benchmark - Round - Combined Energy Avg - Combined Energy SD - Server Energy Avg - Server Energy SD - Client Energy Avg - Client Energy SD - Bandwidth Avg - Bandwidth SD - Framework`,
+      `Benchmark - Round - Combined Energy Avg - Combined Energy SD - Server Energy Avg - Server Energy SD - Database Energy Avg - Database Energy SD - Client Energy Avg - Client Energy SD - Bandwidth Avg - Bandwidth SD - Framework`,
     );
   }
 
@@ -264,6 +285,10 @@ const PROCESSING_WORKER_PATH = path.resolve(
     );
     result.processed.serverEnergyAverage?.convert(EnergyAmountUnit.Joule);
     result.processed.serverEnergyStandardDeviation?.convert(
+      EnergyAmountUnit.Joule,
+    );
+    result.processed.databaseEnergyAverage?.convert(EnergyAmountUnit.Joule);
+    result.processed.databaseEnergyStandardDeviation?.convert(
       EnergyAmountUnit.Joule,
     );
     result.processed.clientEnergyAverage?.convert(EnergyAmountUnit.Joule);
@@ -289,6 +314,14 @@ const PROCESSING_WORKER_PATH = path.resolve(
         } - ${
           result.processed.serverEnergyStandardDeviation
             ? result.processed.serverEnergyStandardDeviation.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.databaseEnergyAverage
+            ? result.processed.databaseEnergyAverage.getString(2)
+            : "N/A"
+        } - ${
+          result.processed.databaseEnergyStandardDeviation
+            ? result.processed.databaseEnergyStandardDeviation.getString(2)
             : "N/A"
         } - ${
           result.processed.clientEnergyAverage
@@ -318,12 +351,14 @@ const PROCESSING_WORKER_PATH = path.resolve(
       header: [
         "Iteration",
         `Server Energy (${EnergyAmountUnit.Joule})`,
+        `Database Energy (${EnergyAmountUnit.Joule})`,
         `Client Energy (${EnergyAmountUnit.Joule})`,
         "Client Bandwidth (B)",
       ],
       fields: result.files.map((processedFile) => [
         processedFile.iteration,
         getCsvEntry(processedFile.server.energyConsumption.total),
+        getCsvEntry(processedFile.database.energyConsumption.total),
         getCsvEntry(processedFile.client.energyConsumption.total),
         processedFile.client.bandwidth?.total.toString() ?? "N/A",
       ]),
@@ -341,6 +376,9 @@ const PROCESSING_WORKER_PATH = path.resolve(
         file.server.energyConsumption?.measurements?.convert(
           EnergyAmountUnit.NanoJoule,
         );
+        file.database.energyConsumption?.measurements?.convert(
+          EnergyAmountUnit.NanoJoule,
+        );
 
         // Energy consumption files
         [
@@ -351,6 +389,10 @@ const PROCESSING_WORKER_PATH = path.resolve(
           {
             name: file.server.name,
             measurements: file.server.energyConsumption?.measurements,
+          },
+          {
+            name: file.database.name,
+            measurements: file.database.energyConsumption?.measurements,
           },
         ].forEach(({ name, measurements }) => {
           const unit = measurements?.getUnit() ?? EnergyAmountUnit.NanoJoule;

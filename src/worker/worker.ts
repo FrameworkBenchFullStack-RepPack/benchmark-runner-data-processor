@@ -158,7 +158,7 @@ async function processGeckoProfilerFile(
   };
 }
 
-async function processServerFile(file: InputFile): Promise<ProcessedFile> {
+async function processCustomFile(file: InputFile): Promise<ProcessedFile> {
   const powerConsumption: {
     total: Decimal;
     measurements: { time: Decimal; energy: Decimal }[];
@@ -233,7 +233,8 @@ function serializeProcessedFile(
         return {
           iteration: Number(iteration),
           client: await processGeckoProfilerFile(nodes.client),
-          server: await processServerFile(nodes.server),
+          server: await processCustomFile(nodes.server),
+          database: await processCustomFile(nodes.database),
         };
       },
     );
@@ -243,24 +244,32 @@ function serializeProcessedFile(
     // Extract measurements
     const combinedEnergyConsumption: EnergyAmount[] = [];
     const serverEnergyConsumption: EnergyAmount[] = [];
+    const databaseEnergyConsumption: EnergyAmount[] = [];
     const clientEnergyConsumption: EnergyAmount[] = [];
     const clientBandwidthConsumption: Decimal[] = [];
 
     // TODO: Make sure that the iterations has the correct order in the list
     for (const file of processedFiles) {
+      const databaseEnergy = file.database.energyConsumption?.total;
       const serverEnergy = file.server.energyConsumption?.total;
       const clientEnergy = file.client.energyConsumption?.total;
       const clientBandwidth = file.client.bandwidth?.total;
 
       if (serverEnergy) serverEnergyConsumption.push(serverEnergy);
+      if (databaseEnergy) databaseEnergyConsumption.push(databaseEnergy);
       if (clientEnergy) clientEnergyConsumption.push(clientEnergy);
       if (clientBandwidth) clientBandwidthConsumption.push(clientBandwidth);
 
-      if (serverEnergy !== undefined && clientEnergy !== undefined) {
+      if (
+        serverEnergy !== undefined &&
+        databaseEnergy !== undefined &&
+        clientEnergy !== undefined
+      ) {
         const combined = new EnergyAmount(
           EnergyAmountUnit.NanoJoule,
           serverEnergy.getAmount(EnergyAmountUnit.NanoJoule),
         );
+        combined.addAmount(databaseEnergy);
         combined.addAmount(clientEnergy);
         combinedEnergyConsumption.push(combined);
       }
@@ -281,6 +290,14 @@ function serializeProcessedFile(
     )?.toJSON();
     const serverEnergyStandardDeviation = getEnergyStandardDeviation(
       serverEnergyConsumption,
+    )?.toJSON();
+
+    // Server energy
+    const databaseEnergyAverage = getAverageEnergy(
+      databaseEnergyConsumption,
+    )?.toJSON();
+    const databaseEnergyStandardDeviation = getEnergyStandardDeviation(
+      databaseEnergyConsumption,
     )?.toJSON();
 
     // Client energy
@@ -310,6 +327,8 @@ function serializeProcessedFile(
           combinedEnergyStandardDeviation,
           serverEnergyAverage,
           serverEnergyStandardDeviation,
+          databaseEnergyAverage,
+          databaseEnergyStandardDeviation,
           clientEnergyAverage,
           clientEnergyStandardDeviation,
           clientBandwidthAverage,
@@ -320,6 +339,7 @@ function serializeProcessedFile(
             iteration: f.iteration,
             client: serializeProcessedFile(f.client),
             server: serializeProcessedFile(f.server),
+            database: serializeProcessedFile(f.database),
           };
         }),
       },
