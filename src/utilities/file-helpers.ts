@@ -20,6 +20,7 @@ export type InputFile = {
 export type GroupedNodes = {
   client: InputFile;
   server: InputFile;
+  database: InputFile;
 };
 
 export type GroupedBenchmarks<NodesContainer> = Record<
@@ -116,7 +117,9 @@ function isCompleteGroupedBenchmarks(
       Object.values(framework).some((round) =>
         Object.values(round).some(
           (iteration) =>
-            iteration.client === undefined || iteration.server === undefined,
+            iteration.client === undefined ||
+            iteration.server === undefined ||
+            iteration.database === undefined,
         ),
       ),
     ),
@@ -143,10 +146,10 @@ export function groupFiles(
       !Number.isSafeInteger(parsedRound) ||
       !benchmark ||
       !framework ||
-      (node !== "client" && node !== "server")
+      (node !== "client" && node !== "server" && node !== "database")
     )
       throw new Error(
-        "Invalid filename - Does not follow convention 'framework_benchmark_iteration_(client.json|server.csv)'",
+        "Invalid filename - Does not follow convention 'framework_benchmark_iteration_(client.json|server.csv|database.csv)'",
       );
 
     // Create object and list if necessary and add file

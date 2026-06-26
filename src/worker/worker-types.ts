@@ -35,6 +35,8 @@ export type WorkerOutputData = {
     combinedEnergyStandardDeviation?: SerializedEnergyAmount;
     serverEnergyAverage?: SerializedEnergyAmount;
     serverEnergyStandardDeviation?: SerializedEnergyAmount;
+    databaseEnergyAverage?: SerializedEnergyAmount;
+    databaseEnergyStandardDeviation?: SerializedEnergyAmount;
     clientEnergyAverage?: SerializedEnergyAmount;
     clientEnergyStandardDeviation?: SerializedEnergyAmount;
     clientBandwidthAverage?: SerializedBandwidth;
@@ -44,6 +46,7 @@ export type WorkerOutputData = {
     iteration: number;
     client: SerializedProcessedFile;
     server: SerializedProcessedFile;
+    database: SerializedProcessedFile;
   }[];
 };
 
